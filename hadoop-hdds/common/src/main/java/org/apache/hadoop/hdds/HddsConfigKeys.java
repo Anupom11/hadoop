@@ -136,4 +136,8 @@ public final class HddsConfigKeys {
   // In any real cluster where performance matters, the SCM, OM and DN
   // metadata locations must be configured explicitly.
   public static final String OZONE_METADATA_DIRS = "ozone.metadata.dirs";
+
+  public static final String HDDS_GRPC_BLOCK_TOKEN_ENABLED = "hdds.grpc.block" +
+      ".token.enabled";
+  public static final boolean HDDS_GRPC_BLOCK_TOKEN_ENABLED_DEFAULT = false;
 }
