@@ -1,0 +1,18 @@
+Fork from apache/hadoop
+
+We did two modifications to this repository of hadoop.
+1. Addition of a new class file named- FileOpTracer
+2. Modified the FSEditLog class to call the methods of FileOpTracer
+
+----Concept----
+Here we add a new journal file concept to record the file move operations inside the file system. 
+Though that kind of records are recorded in the EditLog file as a transaction format, but that 
+details are used to sync the FSImage. 
+
+Further if we want to extract information from the EditLog then we have to go through the number of 
+EditLog files for that particular piece of information and also this will be an I/O and CPU intense 
+process.
+
+So we store that information in a particular file, and the application developer can access that files 
+without directly. 
+
