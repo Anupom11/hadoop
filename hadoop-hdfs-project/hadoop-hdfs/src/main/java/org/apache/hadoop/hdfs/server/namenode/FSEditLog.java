@@ -29,6 +29,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;
 import org.apache.hadoop.conf.Configuration;
@@ -112,8 +114,6 @@ import org.apache.hadoop.security.token.delegation.DelegationKey;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * FSEditLog maintains a log of the namespace modifications.
@@ -122,7 +122,9 @@ import org.slf4j.LoggerFactory;
 @InterfaceAudience.Private
 @InterfaceStability.Evolving
 public class FSEditLog implements LogsPurgeable {
-  public static final Logger LOG = LoggerFactory.getLogger(FSEditLog.class);
+
+  public static final Log LOG = LogFactory.getLog(FSEditLog.class);
+
   /**
    * State machine for edit log.
    * 
@@ -202,6 +204,15 @@ public class FSEditLog implements LogsPurgeable {
    * in selectInputStreams().
    */
   private final Object journalSetLock = new Object();
+
+  //***************************************************************************
+  /**
+   * Creating object of FileOpTracer class for storing file movement information
+   * By Anupom Chakrabarty, date 09/11/2018
+   */
+   public FileOpTracer fileOpTracer = new FileOpTracer();
+
+  //**************************************************************************	
 
   private static class TransactionId {
     public long txid;
@@ -327,8 +338,7 @@ public class FSEditLog implements LogsPurgeable {
       String error = String.format("Cannot start writing at txid %s " +
         "when there is a stream available for read: %s",
         segmentTxId, streams.get(0));
-      IOUtils.cleanupWithLogger(LOG,
-          streams.toArray(new EditLogInputStream[0]));
+      IOUtils.cleanup(LOG, streams.toArray(new EditLogInputStream[0]));
       throw new IllegalStateException(error);
     }
     
@@ -417,14 +427,13 @@ public class FSEditLog implements LogsPurgeable {
    * File-based journals are skipped, since they are formatted by the
    * Storage format code.
    */
-  synchronized void formatNonFileJournals(NamespaceInfo nsInfo, boolean force)
-      throws IOException {
+  synchronized void formatNonFileJournals(NamespaceInfo nsInfo) throws IOException {
     Preconditions.checkState(state == State.BETWEEN_LOG_SEGMENTS,
         "Bad state: %s", state);
     
     for (JournalManager jm : journalSet.getJournalManagers()) {
       if (!(jm instanceof FileJournalManager)) {
-        jm.format(nsInfo, force);
+        jm.format(nsInfo);
       }
     }
   }
@@ -689,9 +698,9 @@ public class FSEditLog implements LogsPurgeable {
                 "Could not sync enough journals to persistent storage " +
                 "due to " + e.getMessage() + ". " +
                 "Unsynced transactions: " + (txid - synctxid);
-            LOG.error(msg, new Exception());
+            LOG.fatal(msg, new Exception());
             synchronized(journalSetLock) {
-              IOUtils.cleanupWithLogger(LOG, journalSet);
+              IOUtils.cleanup(LOG, journalSet);
             }
             terminate(1, msg);
           }
@@ -715,9 +724,9 @@ public class FSEditLog implements LogsPurgeable {
           final String msg =
               "Could not sync enough journals to persistent storage. "
               + "Unsynced transactions: " + (txid - synctxid);
-          LOG.error(msg, new Exception());
+          LOG.fatal(msg, new Exception());
           synchronized(journalSetLock) {
-            IOUtils.cleanupWithLogger(LOG, journalSet);
+            IOUtils.cleanup(LOG, journalSet);
           }
           terminate(1, msg);
         }
@@ -772,7 +781,7 @@ public class FSEditLog implements LogsPurgeable {
     buf.append(editLogStream.getNumSync());
     buf.append(" SyncTimes(ms): ");
     buf.append(journalSet.getSyncTimes());
-    LOG.info(buf.toString());
+    LOG.info(buf);
   }
 
   /** Record the RPC IDs if necessary */
@@ -905,6 +914,19 @@ public class FSEditLog implements LogsPurgeable {
       .setTimestamp(timestamp);
     logRpcIds(op, toLogRpcIds);
     logEdit(op);
+
+    //*************************************************************
+    /** 
+     * Modifications are done to record the file rename/move informations
+     * We do not use any kind of serialization for saving the data. This may hamper the efficiency of the system.
+     * But right now we do not care about the efficiency. Our objective is to retain the file rename/movement information 
+     * for further use in future.
+     * 
+     * By Anupom Chakrabarty, date 02/05/2018, last date of modification 15/05/2018
+     */
+     fileOpTracer.recordRenameFile(src, dst, timestamp);
+    
+    //*************************************************************
   }
 
   /** 
@@ -1712,7 +1734,7 @@ public class FSEditLog implements LogsPurgeable {
       if (recovery != null) {
         // If recovery mode is enabled, continue loading even if we know we
         // can't load up to toAtLeastTxId.
-        LOG.error("Exception while selecting input streams", e);
+        LOG.error(e);
       } else {
         closeAllStreams(streams);
         throw e;
